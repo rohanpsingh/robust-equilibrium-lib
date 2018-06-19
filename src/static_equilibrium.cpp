@@ -303,6 +303,55 @@ LP_status StaticEquilibrium::computeEquilibriumRobustness(Cref_vector3 com, doub
   return LP_STATUS_ERROR;
 }
 
+
+VectorX StaticEquilibrium::computeContactForceCoeffs(Cref_vector3 com, double &robustness)
+{
+  const long m = m_G_centr.cols(); // number of gravito-inertial wrench generators
+  if(m==0)
+    return VectorX();
+
+  if(m_algorithm==STATIC_EQUILIBRIUM_ALGORITHM_LP)
+  {
+    /* Compute the robustness measure of the equilibrium of a specified CoM position
+     * by solving the following LP:
+          find          b, b0
+          minimize      -b0
+          subject to    D c + d <= G b    <= D c + d
+                        0       <= b - b0 <= Inf
+        where
+          b         are the coefficient of the contact force generators (f = V b)
+          b0        is the robustness measure
+          c         is the CoM position
+          G         is the matrix whose columns are the gravito-inertial wrench generators
+    */
+    VectorX b_b0(m+1);
+    VectorX c = VectorX::Zero(m+1);
+    c(m) = -1.0;
+    VectorX lb = -VectorX::Ones(m+1)*1e5;
+    VectorX ub = VectorX::Ones(m+1)*1e10;
+    VectorX Alb = VectorX::Zero(6+m);
+    VectorX Aub = VectorX::Ones(6+m)*1e100;
+    MatrixXX A = MatrixXX::Zero(6+m, m+1);
+    Alb.head<6>() = m_D * com + m_d;
+    Aub.head<6>() = Alb.head<6>();
+    A.topLeftCorner(6,m)      = m_G_centr;
+    A.bottomLeftCorner(m,m)   = MatrixXX::Identity(m,m);
+    A.bottomRightCorner(m,1)  = -VectorX::Ones(m);
+
+    LP_status lpStatus = m_solver->solve(c, lb, ub, A, Alb, Aub, b_b0);
+
+    robustness = convert_b0_to_emax(-1.0*m_solver->getObjectiveValue());
+    SEND_DEBUG_MSG("Primal LP problem status: "+toString(lpStatus));
+    return b_b0;
+  }
+
+  SEND_ERROR_MSG("computeContactForces is not implemented for the specified algorithm");
+  return VectorX();
+}
+
+
+
+
 LP_status StaticEquilibrium::checkRobustEquilibrium(Cref_vector3 com, bool &equilibrium, double e_max)
 {
   if(m_G_centr.cols()==0)
